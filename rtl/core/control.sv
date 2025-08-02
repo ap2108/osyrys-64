@@ -65,11 +65,12 @@ module control (
                 branch           = 1'b1;
                 alu_control_enum = ALU_SUB;
             end
-            OPCODE_NPU_MATMUL: begin
-                is_npu_matrix_mul = 1'b1;
-            end
-            OPCODE_NPU_CONV: begin
-                is_npu_conv = 1'b1;
+            OPCODE_NPU: begin
+                case (funct7)
+                    FUNCT7_MATRIX_MUL: is_npu_matrix_mul = 1'b1;
+                    FUNCT7_CONVOLUTION: is_npu_conv = 1'b1;
+                    default: begin end
+                endcase
             end
             default: ;
         endcase

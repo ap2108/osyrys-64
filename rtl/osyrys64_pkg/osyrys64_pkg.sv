@@ -33,11 +33,8 @@ package osyrys64_pkg;
   parameter logic [6:0] OPCODE_AUIPC       = 7'b0010111;
   parameter logic [6:0] OPCODE_LUI         = 7'b0110111;
 
-  // ============ NPU Custom Opcodes ============
-  parameter logic [6:0] OPCODE_CUSTOM0     = 7'b0001011; // Main custom space
-  parameter logic [6:0] OPCODE_CUSTOM1     = 7'b0101011; // Reserved
-  parameter logic [6:0] OPCODE_NPU_MATMUL  = OPCODE_CUSTOM0;
-  parameter logic [6:0] OPCODE_NPU_CONV    = OPCODE_CUSTOM0;
+  // ============ NPU Custom Opcode (Shared) ============
+  parameter logic [6:0] OPCODE_NPU         = 7'b0001011;
 
   // ============ NPU Custom Function7 Codes ============
   parameter logic [6:0] FUNCT7_MATRIX_MUL  = 7'b0000001;
@@ -57,5 +54,13 @@ package osyrys64_pkg;
     IMM_U_TYPE = 3'b100,
     IMM_CUSTOM = 3'b101
   } imm_type_e;
+
+  // ============ Load Funct3 Constants (for reader.sv) ============
+  parameter logic [2:0] F3_BYTE         = 3'b000;
+  parameter logic [2:0] F3_HALFWORD     = 3'b001;
+  parameter logic [2:0] F3_WORD         = 3'b010;
+  parameter logic [2:0] F3_BYTE_U       = 3'b100;
+  parameter logic [2:0] F3_HALFWORD_U   = 3'b101;
+  parameter logic [2:0] F3_WORD_U       = 3'b110;
 
 endpackage

@@ -1,104 +1,162 @@
+// timescale
 `timescale 1ns/1ps
 
 module memory #(
-    parameter WORDS = 1024,         // 64-bit words
+    parameter WORDS = 1024,
     parameter mem_init = ""
 )(
-    input logic clk,
-    input logic rst_n,
+    input  logic        clk,
+    input  logic        rst_n,
 
-    // CPU interface
-    input  logic         cpu_valid,
-    output logic         cpu_ready,
-    input  logic [63:0]  cpu_address,
-    input  logic [63:0]  cpu_write_data,
-    input  logic [7:0]   cpu_byte_enable,
-    input  logic         cpu_write_enable,
-    output logic [63:0]  cpu_read_data,
+    // CPU Interface
+    input  logic        cpu_valid,
+    output logic        cpu_ready,
+    input  logic [63:0] cpu_address,
+    input  logic [63:0] cpu_write_data,
+    input  logic [7:0]  cpu_byte_enable,
+    input  logic        cpu_write_enable,
+    output logic [63:0] cpu_read_data,
 
-    // NPU interface
-    input  logic         npu_valid,
-    output logic         npu_ready,
-    input  logic [63:0]  npu_address,
-    input  logic [63:0]  npu_write_data,
-    input  logic [7:0]   npu_byte_enable,
-    input  logic         npu_write_enable,
-    output logic [63:0]  npu_read_data,
+    // NPU Interface
+    input  logic        npu_valid,
+    output logic        npu_ready,
+    input  logic [63:0] npu_address,
+    input  logic [63:0] npu_write_data,
+    input  logic [7:0]  npu_byte_enable,
+    input  logic        npu_write_enable,
+    output logic [63:0] npu_read_data,
 
-    // Burst control
-    input  logic [3:0]   burst_len,    // Number of words in burst
-    input  logic         burst_mode    // 0 = single, 1 = burst
+    // Burst controls
+    input  logic        burst_mode,
+    input  logic [3:0]  burst_len
 );
 
-// Memory array (64-bit words)
-reg [63:0] mem [0:WORDS-1];
+    // Memory Array
+    logic [63:0] mem [0:WORDS-1];
 
-// Handshake
-assign cpu_ready = cpu_valid;
-assign npu_ready = npu_valid;
+    // FSM
+    typedef enum logic [1:0] {IDLE, CPU_ACCESS, NPU_ACCESS} state_t;
+    state_t state;
 
-// Initial memory load
-initial begin
-    if (mem_init != "") begin
-        $readmemh(mem_init, mem);
+    // Internal registers
+    logic [3:0]  burst_cnt;
+    logic [63:0] addr_latched;
+    logic        is_write;
+    logic        is_cpu;
+    logic [1:0]  latency_counter;
+
+    // Constants for MMIO region (example: 0x8000_0000 and above)
+    localparam logic [31:0] MMIO_REGION = 32'h8000_0000;
+
+    // Default outputs
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            state         <= IDLE;
+            cpu_ready     <= 0;
+            npu_ready     <= 0;
+            burst_cnt     <= 0;
+            latency_counter <= 0;
+        end else begin
+            case (state)
+                IDLE: begin
+                    cpu_ready <= 0;
+                    npu_ready <= 0;
+                    burst_cnt <= 0;
+
+                    if (cpu_valid) begin
+                        state         <= CPU_ACCESS;
+                        is_write      <= cpu_write_enable;
+                        is_cpu        <= 1;
+                        addr_latched  <= cpu_address[63:3];
+                        latency_counter <= 2; // Simulate 2-cycle latency
+                    end else if (npu_valid) begin
+                        state         <= NPU_ACCESS;
+                        is_write      <= npu_write_enable;
+                        is_cpu        <= 0;
+                        addr_latched  <= npu_address[63:3];
+                        latency_counter <= 2;
+                    end
+                end
+
+                CPU_ACCESS: begin
+                    if (latency_counter != 0) begin
+                        latency_counter <= latency_counter - 1;
+                    end else begin
+                        cpu_ready <= 1;
+
+                        if (!burst_mode) begin
+                            if (is_write) begin
+                                for (int i = 0; i < 8; i++)
+                                    if (cpu_byte_enable[i])
+                                        mem[addr_latched][i*8 +: 8] <= cpu_write_data[i*8 +: 8];
+                            end else begin
+                                cpu_read_data <= mem[addr_latched];
+                            end
+                            state <= IDLE;
+                        end else begin
+                            if (burst_cnt < burst_len) begin
+                                if (is_write) begin
+                                    for (int i = 0; i < 8; i++)
+                                        if (cpu_byte_enable[i])
+                                            mem[addr_latched + burst_cnt][i*8 +: 8] <= cpu_write_data[i*8 +: 8];
+                                end else begin
+                                    cpu_read_data <= mem[addr_latched + burst_cnt];
+                                end
+                                burst_cnt <= burst_cnt + 1;
+                            end else begin
+                                cpu_ready <= 0;
+                                state <= IDLE;
+                            end
+                        end
+                    end
+                end
+
+                NPU_ACCESS: begin
+                    if (latency_counter != 0) begin
+                        latency_counter <= latency_counter - 1;
+                    end else begin
+                        npu_ready <= 1;
+
+                        if (!burst_mode) begin
+                            if (is_write) begin
+                                for (int i = 0; i < 8; i++)
+                                    if (npu_byte_enable[i])
+                                        mem[addr_latched][i*8 +: 8] <= npu_write_data[i*8 +: 8];
+                            end else begin
+                                npu_read_data <= mem[addr_latched];
+                            end
+                            state <= IDLE;
+                        end else begin
+                            if (burst_cnt < burst_len) begin
+                                if (is_write) begin
+                                    for (int i = 0; i < 8; i++)
+                                        if (npu_byte_enable[i])
+                                            mem[addr_latched + burst_cnt][i*8 +: 8] <= npu_write_data[i*8 +: 8];
+                                end else begin
+                                    npu_read_data <= mem[addr_latched + burst_cnt];
+                                end
+                                burst_cnt <= burst_cnt + 1;
+                            end else begin
+                                npu_ready <= 0;
+                                state <= IDLE;
+                            end
+                        end
+                    end
+                end
+
+                // ✅ This default clause silences Verilator's CASEINCOMPLETE warning
+                default: state <= IDLE;
+
+            endcase
+        end
     end
-end
 
-// Reset behavior
-always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-        for (int i = 0; i < WORDS; i++) begin
+    // Memory Initialization
+    initial begin
+        for (int i = 0; i < WORDS; i++)
             mem[i] = 64'd0;
-        end
+        if (mem_init != "")
+            $readmemh(mem_init, mem);
     end
-end
-
-// CPU write
-always_ff @(posedge clk) begin
-    if (cpu_valid && cpu_write_enable) begin
-        for (int i = 0; i < 8; i++) begin
-            if (cpu_byte_enable[i]) begin
-                mem[cpu_address[63:3]][i*8 +: 8] <= cpu_write_data[i*8 +: 8];
-            end
-        end
-    end
-end
-
-// NPU write
-always_ff @(posedge clk) begin
-    if (npu_valid && npu_write_enable) begin
-        for (int i = 0; i < 8; i++) begin
-            if (npu_byte_enable[i]) begin
-                mem[npu_address[63:3]][i*8 +: 8] <= npu_write_data[i*8 +: 8];
-            end
-        end
-    end
-end
-
-// CPU read with burst
-always_ff @(posedge clk) begin
-    if (cpu_valid && !cpu_write_enable) begin
-        if (!burst_mode) begin
-            cpu_read_data <= mem[cpu_address[63:3]];
-        end else begin
-            for (int i = 0; i < burst_len; i++) begin
-                cpu_read_data <= mem[(cpu_address[63:3]) + i];
-            end
-        end
-    end
-end
-
-// NPU read with burst
-always_ff @(posedge clk) begin
-    if (npu_valid && !npu_write_enable) begin
-        if (!burst_mode) begin
-            npu_read_data <= mem[npu_address[63:3]];
-        end else begin
-            for (int i = 0; i < burst_len; i++) begin
-                npu_read_data <= mem[(npu_address[63:3]) + i];
-            end
-        end
-    end
-end
 
 endmodule
