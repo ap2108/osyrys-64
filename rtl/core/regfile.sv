@@ -53,7 +53,7 @@ module regfile (
     // Reset and Write Operations
     // -------------------------------
     always_ff @(posedge clk) begin
-        if (!rst_n) begin
+        if (rst_n == 0) begin // or: if (rst_n == 1'b0) 
             for (int i = 0; i < 32; i++) begin
                 registers[i] <= 64'd0;
                 scoreboard[i] <= 1'b0;
